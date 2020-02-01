@@ -1,20 +1,22 @@
-use actix_web::{App, HttpResponse, HttpServer, Responder, get, post, web, Result};
+extern crate  simplelog;
+
+use simplelog::*;
+use actix_web::{App, HttpResponse, HttpServer, Responder, get, web, Result};
 use serde_json;
-use std::env;
-use std::fs;
-use std::io;
+use std::{env, fs, io};
 use std::path::Path;
-use std::process::exit;
 use serde::{Deserialize, Serialize};
 use log::{info, warn};
-use std::process::{Command, Output};
-use std::borrow::BorrowMut;
+use std::process::{Command, Output, exit};
+use actix_web::web::Data;
+
+static LOGGER: &str = "hooker";
 
 #[derive(Serialize, Deserialize)]
 struct ConfigEntry {
     command: String,
-    webhook: serde_json::Value,
-
+    end_point: String,
+    key: String
 }
 
 #[get("/")]
@@ -22,37 +24,24 @@ async fn index() -> impl Responder {
     HttpResponse::Ok().body("Hooker!")
 }
 
-#[post("/hooker")]
-async fn hooker(config: web::Data<Vec<ConfigEntry>>, json: web::Json<serde_json::Value>) -> Result<String>  {
-    if json.is_object() {
-        let json = json.as_object().unwrap();
-
-        for (key, value) in json.iter() {
-            for config_entry in config.iter() {
-                let mut matches = true;
-                let webhook = config_entry.webhook.as_object().unwrap();
-
-                for (config_key, config_value) in webhook {
-                    if config_key == key {
-                        if config_value != value {
-                            matches = false;
-                        }
-                    }
+async fn process_webook(path: web::Path<String>, config: web::Data<Vec<ConfigEntry>>) -> Result<String>  {
+    let path = path.into_inner();
+    for webhook in config.iter() {
+        if webhook.end_point == path {
+            let result = match run_command(&webhook.command) {
+                Ok(result) => result,
+                Err(_) => {
+                    warn!(target: LOGGER, "Unable to run command for path {}", webhook.end_point);
+                    return Ok(format!("Unable to run command!"))
                 }
-
-                if matches {
-                    println!("{}", "Match found");
-                    run_command(&config_entry.command);
-
-                }
-                else {
-                    println!("{}", "Match not found");
-                }
-            }
+            };
+            info!(target: LOGGER, "Command {} run for path {}", webhook.command, webhook.end_point);
+            return Ok(format!("{}", result.status))
         }
     }
 
-    Ok(format!("test"))
+    warn!(target: LOGGER, "Webhook not found for path {}", path);
+    Ok(format!("Webhook not found in config..."))
 }
 
 fn run_command(command: &String) -> Result<Output, io::Error>{
@@ -65,6 +54,7 @@ fn run_command(command: &String) -> Result<Output, io::Error>{
 }
 
 fn parse_args(args: &[String]) -> (&str, &str, &str) {
+
     let ip = &args[1];
     let port = &args[2];
     let config_dir = &args[3];
@@ -79,12 +69,11 @@ fn read_config(dir: &Path) -> Result<Vec<ConfigEntry>, io::Error>{
         let entry = entry?;
         let path = entry.path();
 
-        if path.is_file() {
+        if path.is_file() && path.extension() == "json"{
             let config_entry = fs::read_to_string(path)?;
             let config_entry:ConfigEntry = serde_json::from_str(&config_entry)?;
 
             config.push(config_entry);
-
         }
 
 
@@ -93,33 +82,50 @@ fn read_config(dir: &Path) -> Result<Vec<ConfigEntry>, io::Error>{
     Ok(config)
 }
 
-#[actix_rt::main]
-async fn main() -> std::io::Result<()> {
-    let args: Vec<String> = env::args().collect();
 
-    let (ip, port, config_path) = parse_args(&args);
+async fn start_server(ip: &str, port: &str, config: Vec<ConfigEntry>) -> std::io::Result<()> {
 
-    println!("{},{},{}", ip, port, config_path);
-    let config_path = Path::new(config_path);
-
-
-    let config = match read_config(config_path) {
-        Ok(config) => config,
-        Err(e) => {
-            println!("Unable to parse config directory: {}", e.to_string());
-            exit(-1);
-        }
-    };
-
-    let config = web::Data::new(config);
-
-    HttpServer::new(move|| {
+    let data:Data<Vec<ConfigEntry>> = web::Data::new(config);
+    HttpServer::new(move || {
         App::new()
-            .app_data(config.clone())
             .service(index)
-            .service(hooker)
+            .route("/{path}/", web::post().to(process_webook))
+            .app_data(data.clone())
     })
         .bind(format!("{}:{}", ip, port))?
         .run()
         .await
+
+}
+
+#[actix_rt::main]
+async fn main() -> std::io::Result<()> {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 3 {
+        println!("{}: [ip address] [port] [config path]", args[0]);
+        return Ok(());
+    }
+
+    let (ip, port, config_path) = parse_args(&args);
+
+    CombinedLogger::init(
+        vec![
+            TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed).unwrap(),
+        ]
+    ).unwrap();
+
+
+    let config_path = Path::new(config_path);
+
+    let config = match read_config(config_path) {
+        Ok(config) => config,
+        Err(e) => {
+            warn!(target: LOGGER, "Unable to parse config directory: {}", e.to_string());
+            exit(-1);
+        }
+    };
+
+    info!(target: LOGGER, "Starting Hooker on {}:{}", ip, port);
+    start_server(ip, port, config).await
 }
