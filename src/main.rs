@@ -16,7 +16,6 @@ static LOGGER: &str = "hooker";
 struct ConfigEntry {
     command: String,
     end_point: String,
-    key: String
 }
 
 #[get("/")]
@@ -68,8 +67,12 @@ fn read_config(dir: &Path) -> Result<Vec<ConfigEntry>, io::Error>{
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
+        let ext = match path.extension() {
+            None => "",
+            Some(ext) => ext.to_str().unwrap()
+        };
 
-        if path.is_file() && path.extension() == "json"{
+        if path.is_file() && ext == "json"{
             let config_entry = fs::read_to_string(path)?;
             let config_entry:ConfigEntry = serde_json::from_str(&config_entry)?;
 
@@ -109,11 +112,14 @@ async fn main() -> std::io::Result<()> {
 
     let (ip, port, config_path) = parse_args(&args);
 
-    CombinedLogger::init(
+    match CombinedLogger::init(
         vec![
-            TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed).unwrap(),
+            SimpleLogger::new(LevelFilter::Info, Config::default())
         ]
-    ).unwrap();
+    ) {
+        Err(_) => println!("Unable to start logging"),
+        _ => ()
+    }
 
 
     let config_path = Path::new(config_path);

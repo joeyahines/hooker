@@ -22,4 +22,4 @@ configured by creating JSON files in the configuration directory with the follow
 ```
 
 * `command` - Linux command to run when a HTTP request is received
-* `end_point` - Endpoint to listen on. The above example would point to `http://[ip_address]:[port]/hooker/coolpoint123`
+* `end_point` - Endpoint to listen on. The above example would point to `http://[ip_address]:[port]/coolpoint123`
