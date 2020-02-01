@@ -1,7 +1,7 @@
-#Hooker
+# Hooker
 A Rust program to run Linux commands when a HTTP request is received at a configurable endpoint.
 
-##How To Use
+## How To Use
 ```bash
 ./hooker [ip address] [port] [config path]
 ```
@@ -10,7 +10,7 @@ A Rust program to run Linux commands when a HTTP request is received at a config
 * `port` - Port to listen on
 * `config path` - Path to a directory to look for config files
 
-##Configuration
+## Configuration
 Configuring end points is done via JSON files. The config path argument takes a path to a directory. Endpoints are then
 configured by creating JSON files in the configuration directory with the following format:
 
